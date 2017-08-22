@@ -3,11 +3,14 @@
 
 module Main where
 
+import Control.Monad (when)
 import Data.Aeson
 import Data.Time
 import GHC.Generics
 import Network.HTTP.Simple
 import System.Environment (getEnv)
+import System.Process.Typed (runProcess_, proc, setStdin, byteStringInput)
+import qualified Data.ByteString.Lazy.Char8 as L8
 import qualified Data.ByteString.Char8 as B
 
 centralParkProject :: Integer
@@ -61,6 +64,23 @@ makeRequest body token = do
     setRequestBodyJSON body $
     req
 
+completeScript :: L8.ByteString
+completeScript = L8.pack $
+  "tell application \"Things3\"\n" ++
+  "  repeat with toDo in to dos of list \"Today\"\n" ++
+  "    set toDoName to name of toDo\n" ++
+  "    if (toDoName as string) is equal to \"Add time to Toggl\" then\n" ++
+  "      set completion date of toDo to current date\n" ++
+  "    end if\n" ++
+  "  end repeat\n" ++
+  "end tell"
+
+completeThingsTask :: IO ()
+completeThingsTask =
+  runProcess_ $
+    setStdin (byteStringInput completeScript) $
+    proc "osascript" ["-"]
+
 
 main :: IO ()
 main = do now <- getCurrentTime
@@ -68,4 +88,6 @@ main = do now <- getCurrentTime
           token <- getEnv "TOGGL_API_TOKEN"
           request <- makeRequest (CreateTimeEntry { time_entry = timeEntryForToday tz now }) token
           response <- httpNoBody request
-          putStrLn $ show $ getResponseStatus response
+          when (getResponseStatusCode response /= 200) $
+            error "Non-200 response from Toggl"
+          completeThingsTask
